@@ -15,6 +15,8 @@ app.use((req, res, next) => {
 
 let data;
 let count = 0;
+let oldData;
+let arrayMatching;
 
 // Функция для получения текущей даты
 function getCurrentDate() {
@@ -36,20 +38,32 @@ const fetchData = async () => {
 const params = {
 'date': currentDate
 };
+// Запрос к API
 const response = await axios.get("https://common-api.wildberries.ru/api/v1/tariffs/box", { headers, params }); 
 
 if(response.status===200){
 data = response?.data?.response?.data;
-// При первом запуске скрипта
+
+// Существует ли предыдущее значение (первый ли запрос)
+if (oldData !== undefined && oldData !== null) {
+	arrayMatching = JSON.stringify(data.warehouseList) === JSON.stringify(oldData)
+  console.log('yes -' + count + 'arraresult - ' + arrayMatching)
+}
+// При первом запуске скрипта добавление информации в базу данных
 if(count===0){
   addToDb();
 }
-// Обновление данных
+// Обновление данных при повторных запусказ через 1 минуту
 else{
-  deleteDb();
-  addToDb();
+  // Обновляется таблица если прыдыдущее и текущее значения не совпадают
+  if(!arrayMatching){
+    deleteDb();
+    addToDb();
+  }
 }
+oldData = data.warehouseList;
 count=count+1;
+
 }
 }catch(error){
 if (error.response) {
@@ -108,7 +122,7 @@ app.get('/test', async (req, res) => {
 // setInterval для обновления данных каждую минуту
   setInterval(fetchData, 60000);
    
-    res.status(200).json({ message: currentDate });
+    res.status(200).json({ message: 'success' });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -124,6 +138,8 @@ app.get('/test3', async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 });
+
+
 
 //start server
 const PORT = process.env.PORT || 4000;
