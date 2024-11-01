@@ -15,8 +15,7 @@ app.use((req, res, next) => {
 
 let data;
 let count = 0;
-let oldData;
-let arrayMatching;
+let compareResult;
 
 // Функция для получения текущей даты
 function getCurrentDate() {
@@ -30,6 +29,7 @@ function getCurrentDate() {
 
 let currentDate = String(getCurrentDate());
 
+// Эта функция получает данные по api, помещает их в базу данных или обновляет значения по условию
 const fetchData = async () => {
   try{
  const headers = {
@@ -43,27 +43,39 @@ const response = await axios.get("https://common-api.wildberries.ru/api/v1/tarif
 
 if(response.status===200){
 data = response?.data?.response?.data;
+let warehouses = data.warehouseList;
 
-// Существует ли предыдущее значение (первый ли запрос)
-if (oldData !== undefined && oldData !== null) {
-	arrayMatching = JSON.stringify(data.warehouseList) === JSON.stringify(oldData)
-  console.log('yes -' + count + 'arraresult - ' + arrayMatching)
-}
-// При первом запуске скрипта добавление информации в базу данных
+// При первом запросебудут созданы новые записи
 if(count===0){
-  addToDb();
+  createAndUpdateDb(warehouses);
 }
-// Обновление данных при повторных запусказ через 1 минуту
+// При следующих запросах, если дата текущая, данные провреяются на совпадение из базы данных и если они не совпадают, т. е. изменились, данные обновляются
+// Если дата не текущая, добавляется новая запись
 else{
-  // Обновляется таблица если прыдыдущее и текущее значения не совпадают
-  if(!arrayMatching){
-    deleteDb();
-    addToDb();
+  let arrayBd = await prisma.warehouseData.findMany();
+arrayBd.forEach(item => {
+  if(item.date == currentDate){
+    arrayBd.forEach((obj1, index1) => {
+      warehouses.forEach((obj2, index2) => {
+        const areEqual = compareObjects(obj1, obj2);
+        if(areEqual){
+          compareResult = true;
+        }
+        else{
+          compareResult = false;
+        }
+      });
+    });
+    if(!compareResult){
+      createAndUpdateDb(warehouses);
+    }
   }
+  else{
+    createAndUpdateDb(warehouses);
+  }
+});
 }
-oldData = data.warehouseList;
-count=count+1;
-
+count = count + 1;
 }
 }catch(error){
 if (error.response) {
@@ -94,35 +106,83 @@ if (error.response) {
 }
 }
 
-// Функция для добавления данных в базу данных
-const addToDb = async () => {
-  const warehouses = data.warehouseList
-  for (const warehouse of warehouses) {
-    const updateUser = await prisma.warehouseData.create({
-      data: {
-        boxDeliveryAndStorageExpr: warehouse.boxDeliveryAndStorageExpr,
-                  boxDeliveryBase: warehouse.boxDeliveryBase,
-                  boxDeliveryLiter: warehouse.boxDeliveryLiter,
-                  boxStorageBase: warehouse.boxStorageBase,
-                  boxStorageLiter: warehouse.boxStorageLiter,
-                  warehouseName: warehouse.warehouseName, 
+// Функция для сравнения объектов, исключая поле date
+function compareObjects(obj1, obj2) {
+  for (const key in obj1) {
+    if (key !== 'date') {
+      if (obj1[key] !== obj2[key]) {
+        return false;
       }
-    });
-}
+    }
+  }
+  return true;
 }
 
-// Функция для удаления данных из базы данных
-const deleteDb = async () => {
-  const deleteUsers = await prisma.warehouseData.deleteMany({})
+// Эта функция получает данные, прогоняет их в цикле и передает в функцию с методом обновления/создания prisma
+const createAndUpdateDb = async (props) => {
+    props.forEach(item => {
+    const {
+      warehouseName,
+      boxDeliveryAndStorageExpr,
+      boxDeliveryBase,
+      boxDeliveryLiter,
+      boxStorageBase,
+      boxStorageLiter
+    } = item;
+
+    upsertFunction(
+      String(warehouseName),
+      String(boxDeliveryAndStorageExpr),
+      String(boxDeliveryBase),
+      String(boxDeliveryLiter),
+      String(boxStorageBase),
+      String(boxStorageLiter)
+    );
+  });
+}
+
+// Если дата текущая, данные обновятся, иначе будет создана новая запись
+const upsertFunction = async (
+  warehouseName, 
+  boxDeliveryAndStorageExpr, 
+  boxDeliveryBase, 
+  boxDeliveryLiter, 
+  boxStorageBase,
+  boxStorageLiter
+) => {
+
+  const updatedUser = await prisma.warehouseData.upsert({
+    where: {
+      warehouseName_date: {
+        warehouseName: warehouseName,
+        date: currentDate,
+      },
+    },
+    update: {
+      boxDeliveryAndStorageExpr: boxDeliveryAndStorageExpr,
+      boxDeliveryBase: boxDeliveryBase,
+      boxDeliveryLiter: boxDeliveryLiter,
+      boxStorageBase: boxStorageBase,
+      boxStorageLiter: boxStorageLiter,
+    },
+    create: {
+      boxDeliveryAndStorageExpr: boxDeliveryAndStorageExpr,
+      boxDeliveryBase: boxDeliveryBase,
+      boxDeliveryLiter: boxDeliveryLiter,
+      boxStorageBase: boxStorageBase,
+      boxStorageLiter: boxStorageLiter,
+      warehouseName: warehouseName, 
+      date: currentDate,
+    },
+  });
 }
 
 app.get('/test', async (req, res) => {
   try {
-   fetchData();
-// setInterval для обновления данных каждую минуту
-  setInterval(fetchData, 60000);
+    fetchData();
+    setInterval(fetchData, 60000);
    
-    res.status(200).json({ message: 'success' });
+  res.status(200).json({ message: 'success'});
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
